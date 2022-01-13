@@ -13,6 +13,7 @@
 #include <vector>
 #include <stdint.h>
 #include <string>
+#include <sstream>
 #include <stdio.h>
 #include <memory>
 
@@ -159,7 +160,7 @@ OSMRoutingGraph load_osm_routing_graph_from_pbf(
 	}
 
 	auto on_new_arc = [&](
-		unsigned x, unsigned y, unsigned dist, unsigned routing_way_id, bool is_antiparallel_to_way,
+		unsigned x, unsigned y, unsigned dist, unsigned capacity, unsigned routing_way_id, bool is_antiparallel_to_way,
 		const std::vector<float>&modelling_node_latitude,
 		const std::vector<float>&modelling_node_longitude)
 	{
@@ -167,6 +168,7 @@ OSMRoutingGraph load_osm_routing_graph_from_pbf(
 		routing_graph.head.push_back(y);
 		routing_graph.geo_distance.push_back(dist);
 		routing_graph.way.push_back(routing_way_id);
+		routing_graph.capacity.push_back(capacity);
 		routing_graph.is_arc_antiparallel_to_way.push_back(is_antiparallel_to_way);
 		if(geometry_to_be_extracted == OSMRoadGeometry::uncompressed){
 			routing_graph.first_modelling_node.push_back(routing_graph.modelling_node_latitude.size());
@@ -258,17 +260,68 @@ OSMRoutingGraph load_osm_routing_graph_from_pbf(
 								modelling_node_longitude.pop_back();
 							}
 
+                            unsigned capacity = 0;
+							std::string highway_type;
+
+                            if(tags["highway"] == nullptr) {
+                                if(tags["area:highway"] == nullptr) {
+                                    bool is_ferry = (tags["ferry"] != nullptr && std::string("yes").compare(tags["ferry"]) == 0)
+                                        || (tags["route"] != nullptr && std::string("ferry").compare(tags["route"]) == 0);
+
+                                    if(!is_ferry) {
+                                        std::stringstream ss;
+                                        std::for_each(tags.begin(), tags.end(), [&](TagMap::Entry const& value) {
+                                            ss << value.key << " -> " << value.value << "; ";
+                                        });
+                                        log_message("Warning: Unknown highway type for edge_id " + std::to_string(osm_way_id) + ", tags: " + ss.str());
+                                    }
+
+                                    highway_type = "";
+                                } else {
+                                    highway_type = tags["area:highway"];
+                                }
+                            } else {
+                                highway_type = tags["highway"];
+                            }
+
+                            if(highway_type == "motorway" || highway_type == "trunk") {
+                                capacity = 2000;
+                            } else if(highway_type == "motorway_link" || highway_type == "trunk_link" || highway_type == "primary"
+                            || highway_type == "primary_link") {
+                                capacity = 1500;
+                            } else if(highway_type == "secondary" || highway_type == "secondary_link") {
+                                capacity = 800;
+                            } else if(highway_type == "tertiary" || highway_type == "minor" || highway_type == "unclassified"
+                            || highway_type == "tertiary_link" || highway_type == "residential") {
+                                capacity = 600;
+                            } else if(highway_type == "living_street") {
+                                capacity = 300;
+                            } else if(highway_type == "track") {
+                                //TODO: Track = Land-/Forstwirtschaft
+                                capacity = 300;
+                            } else if(highway_type == "service") {
+                                //TODO: Service = Zufahrtsweg zu Privatgeländen (Tankstellen, Strand, Campingplatz, ...)
+                                capacity = 300;
+                            } else if(highway_type == "cycleway" || highway_type == "bus_stop" || highway_type == "path"
+                            || highway_type == "proposed" || highway_type == "footway" || highway_type == "disused"
+                            || highway_type == "pedestrian" || highway_type == "construction") {
+                                //TODO: Cycleway = Fahrradweg, Bus Stop = Bushaltestelle, Path = Wanderweg + sonstige Grütze
+                                capacity = 0;
+                            } else if(highway_type != "") {
+                                log_message("UNKNOWN TAG: " + highway_type);
+                            }
+
 							switch(dir){
 							case OSMWayDirectionCategory::only_open_forwards:
-								on_new_arc(routing_id_of_last_routing_node, routing_id_of_current_node, dist_since_last_routing_node, routing_way_id, false, modelling_node_latitude, modelling_node_longitude);
+								on_new_arc(routing_id_of_last_routing_node, routing_id_of_current_node, dist_since_last_routing_node, capacity, routing_way_id, false, modelling_node_latitude, modelling_node_longitude);
 								break;
 							case OSMWayDirectionCategory::open_in_both:
-								on_new_arc(routing_id_of_last_routing_node, routing_id_of_current_node, dist_since_last_routing_node, routing_way_id, false, modelling_node_latitude, modelling_node_longitude);
+								on_new_arc(routing_id_of_last_routing_node, routing_id_of_current_node, dist_since_last_routing_node, capacity, routing_way_id, false, modelling_node_latitude, modelling_node_longitude);
 								// no break
 							case OSMWayDirectionCategory::only_open_backwards:
 								std::reverse(modelling_node_latitude.begin(), modelling_node_latitude.end());
 								std::reverse(modelling_node_longitude.begin(), modelling_node_longitude.end());
-								on_new_arc(routing_id_of_current_node, routing_id_of_last_routing_node, dist_since_last_routing_node, routing_way_id, true, modelling_node_latitude, modelling_node_longitude);
+								on_new_arc(routing_id_of_current_node, routing_id_of_last_routing_node, dist_since_last_routing_node, capacity, routing_way_id, true, modelling_node_latitude, modelling_node_longitude);
 								break;
 							default:
 								assert(false);
