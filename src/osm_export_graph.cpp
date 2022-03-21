@@ -97,13 +97,6 @@ int main(int argc, char*argv[]) {
             }
 
             travel_time.push_back(tt);
-            //travel_time.push_back(geo_distance[i]);
-        }
-
-        for(unsigned a=0; a<travel_time.size(); ++a){
-            travel_time[a] *= 18;
-            travel_time[a] /= way_speed[routing_graph.way[a]];
-            travel_time[a] /= 5;
         }
 
         cout << "Graph properties: " << first_out.size() - 1 << " vertices, " << head.size() << " edges" << endl;
